@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """This module encapsulates a Flask server for the ellipsis intent parser."""
 
+from collections import defaultdict
 
 from flask import Flask, request, json
 
@@ -11,10 +12,25 @@ def build_app():
 
     :return: The app.
     """
-
-    model_types = ['equality']
-
     app = Flask(__name__)
+
+    model_type_store = ['equality']
+    model_store = defaultdict(dict)
+
+    def __get_model_types():
+        return model_type_store
+
+    def __train(team, model_type, intents):
+        model_store[team][model_type] = intents
+
+    def __predict(team, model_type, inpt):
+        model = model_store[team].get(model_type)
+        if model is None:
+            return 'Team or model not found', 404
+
+        intents = [{'intent': inpt, 'probability': 1.0}] if inpt in model else []
+
+        return {'predictions': intents}
 
     def make_url(suffix):
         """Makes a URL with the suffix.
@@ -38,7 +54,7 @@ def build_app():
 
         :return: The model types in JSON.
         """
-        return json.dumps({'modelTypes': model_types})
+        return json.dumps({'modelTypes': __get_model_types()})
 
     @app.route(make_url('/train/<team>'), methods=['PUT'])
     def train_model(team):
@@ -47,28 +63,30 @@ def build_app():
         :param team: The team id.
         :return: Status of the request.
         """
-        # todo implement
+        body = request.get_json()
+        model_types = body['modelTypes']
+        allowed_model_types = __get_model_types()
+        for model_type in model_types:
+            if model_type not in allowed_model_types:
+                return 'Bad model type: ' + model_type, 400
+
+        intents = body['intents']
+        for model_type in model_types:
+            __train(team, model_type, intents)
         return 'Success'
 
-    @app.route(make_url('/predict/<team>'), methods=['GET'])
-    def predict_intent(team):
+    @app.route(make_url('/predict/<team>/<model_type>'), methods=['GET'])
+    def predict_intent(team, model_type):
         """Predicts which intent(s) are matched by a given input.
 
         :param team: The team id.
         :return: The predicted intent.
         """
-        # todo implement
-        return {}
+        inpt = request.args.get('input')
+        if inpt is None:
+            return 'Missing input query arg', 400
 
-    @app.route(make_url('/feedback/<prediction_id>'), methods=['POST'])
-    def provide_feedback(prediction_id):
-        """Allows feedback on a given prediction to refine the model.
-
-        :param prediction_id: The id of the prediction to provide feedback on,
-        :return: Status of the request.
-        """
-        # todo implement
-        return 'Success'
+        return __predict(team, model_type, inpt)
 
 
 if __name__ == '__main__':
