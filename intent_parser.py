@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """This module encapsulates a Flask server for the intent parser."""
 
-from collections import defaultdict
-
 from flask import Flask, request, json
+
+from EqualityModel import EqualityModel
 
 
 def build_app():
@@ -14,23 +14,29 @@ def build_app():
     """
     app = Flask(__name__)
 
-    model_type_store = ['equality']
-    model_store = defaultdict(dict)
+    model_type_store = {'equality': EqualityModel}
+    model_store = {}
+    skills_store = {}
 
     def __get_model_types():
-        return model_type_store
+        return model_type_store.keys()
 
-    def __train(team, model_type, intents):
-        model_store[team][model_type] = intents
+    def __train(team, model_type, skills):
+        if team not in model_store:
+            model_store[team] = {}
+        model = model_type_store[team]()
+        model.train(skills)
+        model_store[team][model_type] = model
 
-    def __predict(team, model_type, inpt):
-        model = model_store[team].get(model_type)
-        if model is None:
-            return 'Team or model not found', 404
+    def __predict(team, model_type, user_input, is_mention):
+        if team not in model_store:
+            return 'Team not found', 404
+        if model_type not in model_store[team]:
+            return 'Team model not found', 404
 
-        intents = [{'intent': inpt, 'probability': 1.0}] if inpt in model else []
-
-        return {'predictions': intents}
+        model = model_store[team][model_type]
+        skills = skills_store[team]
+        return model.predict(skills, user_input, is_mention)
 
     def make_url(suffix):
         """Makes a URL with the suffix.
@@ -61,33 +67,57 @@ def build_app():
         """Trains or retrains the specified model for the given team based on possible intents.
 
         :param team: The team id.
+
         :return: Status of the request.
         """
         body = request.get_json()
-        model_types = body['modelTypes']
-        allowed_model_types = __get_model_types()
-        for model_type in model_types:
-            if model_type not in allowed_model_types:
-                return 'Bad model type: ' + model_type, 400
 
-        intents = body['intents']
-        for model_type in model_types:
-            __train(team, model_type, intents)
+        skills = body['skills']
+        for model_type in model_type_store.keys():
+            __train(team, model_type, skills)
+
+        skills_store[team] = skills
+
         return 'Success'
 
     @app.route(make_url('/predict/<team>/<model_type>'), methods=['GET'])
-    def predict_intent(team, model_type):
-        """Predicts which intent(s) are matched by a given input.
+    def predict_action(team, model_type):
+        """Predicts which action(s) are matched by a given input.
 
         :param team: The team id.
-        :return: The predicted intent.
-        """
-        inpt = request.args.get('input')
-        if inpt is None:
-            return 'Missing input query arg', 400
+        :param model_type: The model to use to predict the action.
 
-        return __predict(team, model_type, inpt)
+        :return: The predicted action.
+        """
+        user_input = request.args.get('input')
+        if user_input is None:
+            return 'Missing \'input\' query arg', 400
+
+        is_mention = request.args.get('isMention')
+        if is_mention is None:
+            return 'Missing \'isMention\' query arg', 400
+
+        return json.dumps({
+            'prediction_set_id': 0,
+            'predictions': __predict(team, model_type, user_input, is_mention)
+        })
+
+    @app.route(make_url('/feedback/<prediction_set_id>'), methods=['POST'])
+    def provide_feedback(prediction_set_id):
+        """Saves user feedback on a given prediction set for future training use.
+
+        :param prediction_set_id: The id of the prediction set.
+
+        :return: Status of the request.
+        """
+        body = request.get_json()
+
+        # todo save body to database
+
+        return 'Success'
+
+    return app
 
 
 if __name__ == '__main__':
-    build_app().run(host='0.0.0.0', port=5000)
+    build_app().run(host='0.0.0.0', port=80)
