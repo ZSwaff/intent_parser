@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""This module encapsulates a Flask server for the ellipsis intent parser."""
+"""This module encapsulates a Flask server for the intent parser."""
 
 from collections import defaultdict
 
